@@ -1,0 +1,7 @@
+{
+  "name": "Scripture Voice",
+  "description": "A Bible AI-Podcast app that finds verses via voice search and reads them aloud using Gemini's advanced Text-to-Speech voices.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
