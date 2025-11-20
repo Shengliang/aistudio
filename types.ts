@@ -8,6 +8,15 @@ export interface BiblePassage {
 export interface SearchResult {
   passage: BiblePassage;
   summary: string;
+  timestamp?: number;
+}
+
+export interface HistoryItem {
+  key: string;
+  query: string;
+  reference: string;
+  timestamp: number;
+  language: Language;
 }
 
 export enum VoiceName {
