@@ -18,3 +18,11 @@ View your app in AI Studio: https://ai.studio/apps/drive/1XtbU4FjpBlT5d4GUh2FIbr
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+**Podcast Voice Application Examples***
+
+1. scripture_voice
+2. chinese-poem-voice
+3. database-kernel-voice
+4. linux-kernel-voice
+5. software-interview-voice
