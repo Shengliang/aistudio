@@ -1,0 +1,7 @@
+{
+  "name": "Database Kernel Voice",
+  "description": "Database Kernel Voice",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
