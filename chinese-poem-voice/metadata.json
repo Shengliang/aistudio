@@ -1,0 +1,7 @@
+{
+  "name": "Chinese Poem Voice",
+  "description": "Chinese Poem Voice",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
