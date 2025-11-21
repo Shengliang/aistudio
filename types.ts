@@ -34,4 +34,9 @@ export interface AudioState {
   error: string | null;
 }
 
+export interface PlaylistItem {
+  text: string;
+  voice: VoiceName;
+}
+
 export type Language = 'en' | 'zh';

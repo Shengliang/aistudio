@@ -10,7 +10,7 @@ import BibleNavigation from './components/BibleNavigation';
 import AboutModal from './components/AboutModal';
 import CacheModal from './components/CacheModal';
 import HistorySidebar from './components/HistorySidebar';
-import { SearchResult, VoiceName, Language } from './types';
+import { SearchResult, VoiceName, Language, PlaylistItem } from './types';
 import { searchVerseOnly, generateDevotional, generateSegmentSpeech, generateBibleImage, generateSongLyrics, checkCacheExistence, getCachedImage } from './services/geminiService';
 import { splitTextIntoChunks } from './utils/audioUtils';
 import { getAdjacentChapterQuery } from './utils/bibleNavigation';
@@ -23,7 +23,7 @@ const App: React.FC = () => {
   // --- Audio Streaming State ---
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | undefined>(undefined);
-  const [playlist, setPlaylist] = useState<string[]>([]);
+  const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [isBuffering, setIsBuffering] = useState(false);
   const [currentAudioTitle, setCurrentAudioTitle] = useState<string>("");
@@ -41,6 +41,7 @@ const App: React.FC = () => {
   const [songLyrics, setSongLyrics] = useState<string | null>(null);
   const [isGeneratingLyrics, setIsGeneratingLyrics] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isMusicMenuOpen, setIsMusicMenuOpen] = useState(false);
 
   // --- PDF/Share State ---
   const [isPdfLoading, setIsPdfLoading] = useState(false);
@@ -58,7 +59,7 @@ const App: React.FC = () => {
   const [pendingCacheData, setPendingCacheData] = useState<SearchResult | null>(null);
   const [pendingQuery, setPendingQuery] = useState<string>('');
 
-  const CLIENT_VERSION = "4.2.0";
+  const CLIENT_VERSION = "4.4.0";
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
@@ -93,6 +94,15 @@ const App: React.FC = () => {
     setIsGeneratingLyrics(false);
     setError(null);
     setIsShareMenuOpen(false);
+    setIsMusicMenuOpen(false);
+  };
+
+  // Helper to determine the opposite gender voice for contrast
+  const getComplementaryVoice = (mainVoice: VoiceName): VoiceName => {
+    // If main is Kore (Female), use Fenrir (Male)
+    if (mainVoice === VoiceName.Kore) return VoiceName.Fenrir;
+    // If main is any Male/Androgynous voice, use Kore (Female)
+    return VoiceName.Kore;
   };
 
   // The initial entry point for any search
@@ -216,6 +226,21 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExternalMusicGen = (platform: 'suno' | 'udio') => {
+    handleCopyLyrics();
+    const url = platform === 'suno' ? 'https://suno.com/create' : 'https://www.udio.com/create';
+    
+    setShareMessage(language === 'zh' 
+        ? `歌詞已複製！正在前往 ${platform === 'suno' ? 'Suno' : 'Udio'}...` 
+        : `Lyrics copied! Opening ${platform === 'suno' ? 'Suno' : 'Udio'}...`);
+    
+    setTimeout(() => {
+        window.open(url, '_blank');
+        setShareMessage(null);
+        setIsMusicMenuOpen(false);
+    }, 1500);
+  };
+
   const handleCopyToClipboard = async () => {
     if (!searchResult) return;
     
@@ -251,7 +276,7 @@ const App: React.FC = () => {
 
     if (songLyrics) {
       htmlContent += `
-        <div style="margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 5px;">
+        <div style="margin: 20px 0;">
           <h4 style="margin-top: 0;">Song Lyrics</h4>
           <pre style="font-family: monospace; white-space: pre-wrap;">${songLyrics}</pre>
         </div>
@@ -330,7 +355,10 @@ const App: React.FC = () => {
         scale: 2, // Higher scale for better resolution
         useCORS: true, // Allow images (if any)
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        ignoreElements: (el) => {
+            return el.hasAttribute('data-html2canvas-ignore');
+        }
       });
 
       const imgData = canvas.toDataURL('image/png');
@@ -385,11 +413,11 @@ const App: React.FC = () => {
     }
   };
 
-  const fetchAudioChunk = async (index: number, text: string): Promise<string> => {
+  const fetchAudioChunk = async (index: number, item: PlaylistItem): Promise<string> => {
     if (audioCache.current[index]) return audioCache.current[index];
     if (audioPromises.current[index]) return audioPromises.current[index];
 
-    const promise = generateSegmentSpeech(text, selectedVoice)
+    const promise = generateSegmentSpeech(item.text, item.voice)
       .then(url => {
         audioCache.current[index] = url;
         return url;
@@ -403,27 +431,26 @@ const App: React.FC = () => {
     return promise;
   };
 
-  const startAudioPlayback = async (text: string, title: string) => {
+  const startAudioPlayback = async (items: PlaylistItem[], title: string) => {
     resetAudioState();
     setIsGeneratingAudio(true);
     setError(null);
     setCurrentAudioTitle(title);
 
-    const chunks = splitTextIntoChunks(text);
-    setPlaylist(chunks);
+    setPlaylist(items);
 
-    if (chunks.length === 0) {
+    if (items.length === 0) {
       setIsGeneratingAudio(false);
       return;
     }
 
     try {
-      const firstChunkUrl = await fetchAudioChunk(0, chunks[0]);
+      const firstChunkUrl = await fetchAudioChunk(0, items[0]);
       setAudioUrl(firstChunkUrl);
       setCurrentChunkIndex(0);
       
-      for (let i = 1; i < Math.min(chunks.length, 3); i++) {
-        fetchAudioChunk(i, chunks[i]);
+      for (let i = 1; i < Math.min(items.length, 3); i++) {
+        fetchAudioChunk(i, items[i]);
       }
     } catch (err) {
       setError(language === 'zh' ? "語音生成失敗 (可能離線)。" : "Failed to start audio streaming (Check connection).");
@@ -434,20 +461,44 @@ const App: React.FC = () => {
 
   const handlePlay = () => {
     if (!searchResult) return;
-    // Prevent re-triggering main playback if it's already the active one
     if (playlist.length > 0 && currentAudioTitle === searchResult.passage.reference) return;
 
+    // 1. Prepare Verse (Primary Voice)
+    const verseText = `${searchResult.passage.reference}. ${searchResult.passage.text}.`;
+    const verseChunks = splitTextIntoChunks(verseText).map(chunk => ({
+      text: chunk,
+      voice: selectedVoice // User choice
+    }));
+
+    // 2. Prepare Context (Complementary Voice)
     const currentContext = searchResult.passage.context || "";
-    const contextIntro = currentContext ? (language === 'zh' ? '靈修分享:' : 'Devotional Content:') : "";
-    const fullText = `${searchResult.passage.reference}. ${searchResult.passage.text}. ${contextIntro} ${currentContext}`;
+    const secondaryVoice = getComplementaryVoice(selectedVoice);
     
-    startAudioPlayback(fullText, searchResult.passage.reference);
+    let contextChunks: PlaylistItem[] = [];
+    if (currentContext) {
+      const contextIntro = language === 'zh' ? '靈修分享:' : 'Devotional Content:';
+      const contextFull = `${contextIntro} ${currentContext}`;
+      contextChunks = splitTextIntoChunks(contextFull).map(chunk => ({
+        text: chunk,
+        voice: secondaryVoice // Switched voice
+      }));
+    }
+
+    // 3. Combine
+    const fullPlaylist = [...verseChunks, ...contextChunks];
+    
+    startAudioPlayback(fullPlaylist, searchResult.passage.reference);
   };
 
   const handlePlayLyrics = () => {
     if (!songLyrics) return;
     const title = language === 'zh' ? '詩歌朗讀' : 'Song Lyrics';
-    startAudioPlayback(songLyrics, title);
+    // For lyrics, we just use the primary selected voice for consistency
+    const chunks = splitTextIntoChunks(songLyrics).map(chunk => ({
+      text: chunk,
+      voice: selectedVoice
+    }));
+    startAudioPlayback(chunks, title);
   };
 
   const handleAudioEnded = async () => {
@@ -611,59 +662,10 @@ const App: React.FC = () => {
               {/* Content Card Container - This is what we print */}
               <div id="printable-content" className="bg-white rounded-2xl shadow-xl border border-bible-100 overflow-hidden relative">
                 
-                {/* Share & Download Menu */}
-                <div className="absolute top-4 right-4 z-20 print:hidden flex items-center gap-2">
-                  <div className="relative">
-                    <button
-                      onClick={() => setIsShareMenuOpen(!isShareMenuOpen)}
-                      className="p-2 bg-white/80 backdrop-blur text-bible-500 hover:text-bible-800 hover:bg-white rounded-full shadow-sm border border-bible-100 transition-colors"
-                      title={language === 'zh' ? "分享" : "Share"}
-                    >
-                      <Share2 className="w-5 h-5" />
-                    </button>
-                    
-                    {isShareMenuOpen && (
-                      <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-bible-100 overflow-hidden z-30 animate-slide-up">
-                         <button
-                           onClick={handleOpenGoogleDocs}
-                           className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2"
-                         >
-                           <ExternalLink className="w-4 h-4 text-blue-500" />
-                           {language === 'zh' ? '複製並打開 Google Doc' : 'Copy & Open Google Doc'}
-                         </button>
-                         <button
-                           onClick={handleCopyToClipboard}
-                           className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2 border-t border-bible-50"
-                         >
-                           <ClipboardCopy className="w-4 h-4 text-bible-500" />
-                           {language === 'zh' ? '複製所有內容' : 'Copy All Content'}
-                         </button>
-                         <button
-                           onClick={handleNativeShare}
-                           className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2 border-t border-bible-50 md:hidden"
-                         >
-                           <Share2 className="w-4 h-4 text-bible-500" />
-                           {language === 'zh' ? '分享連結' : 'Share Link'}
-                         </button>
-                         <button
-                           onClick={handleDownloadPdf}
-                           disabled={isPdfLoading}
-                           className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2 border-t border-bible-50"
-                         >
-                           {isPdfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 text-red-500" />}
-                           {language === 'zh' ? '下載 PDF' : 'Download PDF'}
-                         </button>
-                      </div>
-                    )}
-                    
-                    {isShareMenuOpen && (
-                      <div className="fixed inset-0 z-10" onClick={() => setIsShareMenuOpen(false)} />
-                    )}
-                  </div>
-                </div>
-
-                {/* Verse Header */}
+                {/* Verse Header - Responsive Layout */}
                 <div className="bg-bible-50 px-4 py-4 border-b border-bible-100 flex flex-col md:flex-row items-center justify-between gap-4 print:bg-white print:border-b-2 print:border-black">
+                  
+                  {/* Navigation Group */}
                   <div className="flex items-center justify-between w-full md:w-auto md:justify-start gap-2 md:gap-4 flex-1">
                     <button 
                       onClick={() => handleNavigate('prev')}
@@ -691,23 +693,76 @@ const App: React.FC = () => {
                     </button>
                   </div>
                   
-                  {playlist.length === 0 && (
-                    <button
-                      onClick={handlePlay}
-                      disabled={isGeneratingAudio || !isOnline}
-                      className="flex items-center gap-2 bg-bible-800 text-white px-6 py-2.5 rounded-full font-medium hover:bg-bible-900 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed w-full md:w-auto justify-center flex-shrink-0 print:hidden"
-                      title={!isOnline ? "Offline" : "Play"}
-                    >
-                      {isGeneratingAudio ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      ) : (
-                        <>
-                          <Volume2 className="w-5 h-5" />
-                          <span>{language === 'zh' ? '播放' : 'Play'}</span>
-                        </>
+                  {/* Action Buttons Group (Play + Share) */}
+                  <div className="flex items-center gap-2 w-full md:w-auto justify-center md:justify-end mt-2 md:mt-0 print:hidden">
+                     {/* Play Button */}
+                     {playlist.length === 0 && (
+                      <button
+                        onClick={handlePlay}
+                        disabled={isGeneratingAudio || !isOnline}
+                        className="flex items-center gap-2 bg-bible-800 text-white px-5 py-2.5 rounded-full font-medium hover:bg-bible-900 transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed flex-shrink-0"
+                        title={!isOnline ? "Offline" : "Play"}
+                      >
+                        {isGeneratingAudio ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <>
+                            <Volume2 className="w-5 h-5" />
+                            <span>{language === 'zh' ? '播放' : 'Play'}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {/* Share & Download Menu */}
+                    <div className="relative" data-html2canvas-ignore>
+                      <button
+                        onClick={() => setIsShareMenuOpen(!isShareMenuOpen)}
+                        className="p-2.5 bg-white text-bible-500 hover:text-bible-800 hover:bg-bible-50 rounded-full shadow-sm border border-bible-200 transition-colors"
+                        title={language === 'zh' ? "分享" : "Share"}
+                      >
+                        <Share2 className="w-5 h-5" />
+                      </button>
+                      
+                      {isShareMenuOpen && (
+                        <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-bible-100 overflow-hidden z-30 animate-slide-up">
+                           <button
+                             onClick={handleOpenGoogleDocs}
+                             className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2"
+                           >
+                             <ExternalLink className="w-4 h-4 text-blue-500" />
+                             {language === 'zh' ? '複製並打開 Google Doc' : 'Copy & Open Google Doc'}
+                           </button>
+                           <button
+                             onClick={handleCopyToClipboard}
+                             className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2 border-t border-bible-50"
+                           >
+                             <ClipboardCopy className="w-4 h-4 text-bible-500" />
+                             {language === 'zh' ? '複製所有內容' : 'Copy All Content'}
+                           </button>
+                           <button
+                             onClick={handleNativeShare}
+                             className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2 border-t border-bible-50 md:hidden"
+                           >
+                             <Share2 className="w-4 h-4 text-bible-500" />
+                             {language === 'zh' ? '分享連結' : 'Share Link'}
+                           </button>
+                           <button
+                             onClick={handleDownloadPdf}
+                             disabled={isPdfLoading}
+                             className="w-full text-left px-4 py-3 text-sm text-bible-700 hover:bg-bible-50 flex items-center gap-2 border-t border-bible-50"
+                           >
+                             {isPdfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 text-red-500" />}
+                             {language === 'zh' ? '下載 PDF' : 'Download PDF'}
+                           </button>
+                        </div>
                       )}
-                    </button>
-                  )}
+                      
+                      {isShareMenuOpen && (
+                        <div className="fixed inset-0 z-10" onClick={() => setIsShareMenuOpen(false)} />
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Creative Area - Image and Song */}
@@ -787,6 +842,41 @@ const App: React.FC = () => {
                                   )}
                                   {language === 'zh' ? '朗讀' : 'Read'}
                                </button>
+                               
+                               {/* Create Real Music Menu */}
+                               <div className="relative">
+                                <button 
+                                  onClick={() => setIsMusicMenuOpen(!isMusicMenuOpen)}
+                                  className="flex items-center gap-1 text-xs font-medium text-white bg-purple-600 hover:bg-purple-700 px-3 py-1.5 rounded-full transition-colors print:hidden"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  {language === 'zh' ? '生成音樂' : 'Create Audio'}
+                                </button>
+
+                                {isMusicMenuOpen && (
+                                  <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-bible-100 overflow-hidden z-30 animate-slide-up text-left">
+                                    <div className="p-2 text-[10px] text-bible-400 bg-bible-50 border-b border-bible-100">
+                                      {language === 'zh' ? '複製歌詞並前往:' : 'Copies lyrics & opens:'}
+                                    </div>
+                                    <button
+                                      onClick={() => handleExternalMusicGen('suno')}
+                                      className="w-full text-left px-4 py-2.5 text-sm text-bible-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2"
+                                    >
+                                      <span className="font-bold">Suno AI</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleExternalMusicGen('udio')}
+                                      className="w-full text-left px-4 py-2.5 text-sm text-bible-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2 border-t border-bible-50"
+                                    >
+                                      <span className="font-bold">Udio</span>
+                                    </button>
+                                  </div>
+                                )}
+                                {isMusicMenuOpen && (
+                                  <div className="fixed inset-0 z-20" onClick={() => setIsMusicMenuOpen(false)} />
+                                )}
+                               </div>
+
                                <button 
                                  onClick={handleCopyLyrics}
                                  className="flex items-center gap-1 text-xs font-medium text-bible-500 hover:text-bible-800 bg-bible-50 hover:bg-bible-100 px-3 py-1.5 rounded-full transition-colors print:hidden"
